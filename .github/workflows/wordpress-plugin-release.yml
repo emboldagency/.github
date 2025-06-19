@@ -58,7 +58,7 @@ jobs:
             ${{ runner.os }}-wpcli-packages-
 
       - name: Ensure tag matches pattern
-        if: github.ref_type == 'tag'
+        if: (github.ref_type == 'tag') || (inputs.tag != '')
         run: |
           if [[ ! "${{ inputs.tag }}" =~ ^${{ inputs.tag_pattern }}$ ]]; then
             echo "Tag '${{ inputs.tag }}' does not match required pattern: ^${{ inputs.tag_pattern }}$"
@@ -67,7 +67,7 @@ jobs:
 
       - name: Check plugin versions match tag
         uses: ./.github/actions/sync-versions
-        if: github.ref_type == 'tag'
+        if: (github.ref_type == 'tag') || (inputs.tag != '')
         with:
           fix: ${{ inputs.fix }}
           plugin_main_file: ${{ inputs.plugin_main_file || format('{0}.php', github.event.repository.name) }}
