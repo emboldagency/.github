@@ -1,5 +1,13 @@
 name: "Sync Plugin Versions"
-description: "Checks or updates version numbers in plugin files to match the latest Git tag."
+description: |
+  Checks or updates version numbers in plugin files to match the latest Git tag.
+  
+  - On a tag (release) run, this action compares the version in your main plugin file and readme.txt to the latest local Git tag.
+  - If `fix` is `false` (default), the action will fail if the versions do not match the tag.
+  - If `fix` is `true`, the action will update the version numbers in both files to match the tag.
+  - If run on a branch (not a tag), the action will detect this and exit successfully without making changes or failing.
+  
+  This ensures your plugin version numbers are always in sync with your release tags, and prevents accidental mismatches.
 inputs:
   fix:
     type: boolean

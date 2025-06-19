@@ -5,13 +5,28 @@ on:
     tags:
       - "[0-9]+.[0-9]+.[0-9]" # IMPORTANT: This should match the tag_pattern input below
   workflow_dispatch:
+    inputs:
+      tag:
+        required: false
+        type: string
+        description: 'Release tag (e.g., 1.0.0 or v1.0.0)'
+      fix:
+        required: false
+        type: boolean
+        default: false
+        description: 'If true, automatically update version numbers in plugin files to match the tag. If false, only check and fail on mismatch.'
 
 jobs:
   wordpress-plugin-release:
     uses: emboldagency/.github/.github/workflows/wordpress-plugin-release.yml@v1
     with:
-      tag: ${{ github.ref_name }}
+      tag: ${{ github.event.inputs.tag || github.ref_name }}
       plugin_main_file: my-plugin.php # or omit to use the default <repo>.php
       readme_file: readme.txt # optional, default is readme.txt
-      fix: false # set to true to auto-fix version numbers (boolean)
+      fix: ${{ github.event.inputs.fix == 'true' || github.event.inputs.fix == true }} # Workaround for GitHub Actions boolean input handling
       tag_pattern: '[0-9]+\.[0-9]+\.[0-9]+' # IMPORTANT: This should match the on.push.tags pattern above
+#
+# Note: The sync-versions action will only run on tag events. If this workflow runs on a branch (e.g., via workflow_dispatch),
+# the version check/update will be skipped and the workflow will continue without error.
+#
+# If fix is set to true, the action will update the version numbers in your plugin files to match the tag. Otherwise, it will fail if they do not match.
