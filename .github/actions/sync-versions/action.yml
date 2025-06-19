@@ -21,6 +21,14 @@ runs:
     - name: Make script executable
       run: chmod +x "${{ github.action_path }}/sync-versions.sh"
 
+    - name: Skip on branch (only run on tags)
+      shell: bash
+      run: |
+        if [[ "${GITHUB_REF:-}" != refs/tags/* ]]; then
+          echo "Not running on a tag. Skipping sync-versions."
+          exit 0
+        fi
+
     - name: Sync or check versions
       shell: bash
       run: |
