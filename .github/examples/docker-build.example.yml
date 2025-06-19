@@ -1,0 +1,22 @@
+name: Docker Build and Push
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]"
+  workflow_dispatch:
+    inputs:
+      skip-jobs:
+        description: "Space-separated list of jobs to skip"
+        required: false
+        default: ""
+
+jobs:
+  call-shared-docker-build:
+    uses: embold/.github/.github/workflows/docker-build.yml@main
+    with:
+      tag: ${{ github.ref_name }}
+      skip-jobs: ${{ github.event.inputs.skip-jobs || '' }}
+    secrets:
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}

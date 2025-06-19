@@ -1,0 +1,49 @@
+name: WordPress Plugin Release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      GITHUB_TOKEN:
+        required: true
+
+jobs:
+  dist:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP with Composer and WP-CLI
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer, wp-cli
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check plugin versions match tag
+        uses: ./.github/actions/sync-versions
+        with:
+          fix: "false" # or "true" to auto-fix
+          plugin_main_file: wphaven.php
+          readme_file: readme.txt
+
+      - name: Install dist-archive command
+        run: wp package install wp-cli/dist-archive-command:@stable
+
+      - name: Build plugin
+        run: |
+          composer install --no-dev --prefer-dist --optimize-autoloader
+
+      - name: Build distribution archive
+        run: wp dist-archive . dist --create-target-dir
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(inputs.tag, 'v')
+        with:
+          files: ./dist/*

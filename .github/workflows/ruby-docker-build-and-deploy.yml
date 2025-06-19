@@ -1,0 +1,84 @@
+name: Ruby Docker Build and Coder Template Update
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      skip-jobs:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      DOCKER_USER:
+        required: true
+      DOCKER_TOKEN:
+        required: true
+      CODER_TOKEN:
+        required: true
+
+jobs:
+  initialization:
+    runs-on: ubuntu-latest
+    outputs:
+      skip-build-and-push-docker: ${{ steps.set-skip-build-and-push-docker.outputs.skip }}
+    steps:
+      - name: Determine Jobs to Skip
+        id: set-skip-build-and-push-docker
+        run: |
+          if [[ "${{ inputs.skip-jobs }}" == *"build-and-push-docker"* ]]; then
+            echo "skip=true" >> $GITHUB_ENV
+          else
+            echo "skip=false" >> $GITHUB_ENV
+          fi
+
+  build-and-push-docker:
+    if: ${{ !contains(inputs.skip-jobs, 'build-and-push-docker') }}
+    runs-on: ubuntu-latest
+    needs: initialization
+    strategy:
+      matrix:
+        ruby_version: ["3.3.4", "3.2.5", "3.1.6", "3.0.7", "2.7.8"]
+        ubuntu_version: ["24.04", "22.04"]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./build
+          file: ./build/Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKER_USER }}/ruby:${{ matrix.ruby_version }}-ubuntu${{ matrix.ubuntu_version }}
+          build-args: |
+            RUBY_VERSION=${{ matrix.ruby_version }}
+            UBUNTU_VERSION=${{ matrix.ubuntu_version }}
+
+  update-coder-template:
+    if: ${{ !contains(inputs.skip-jobs, 'update-coder-template') || needs.initialization.outputs.skip-build-and-push-docker == 'true' || success() }}
+    runs-on: ubuntu-latest
+    needs: [initialization, build-and-push-docker]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Update Coder Template
+        uses: matifali/update-coder-template@v3
+        with:
+          id: ruby
+          dir: .
+          url: https://embold.dev
+          name: ${{ inputs.tag }}
+          message: "Uploaded by GitHub Actions. Release notes: https://github.com/emboldagency/docker-ruby/releases/tag/${{ inputs.tag }}"
+          coder_session_token: ${{ secrets.CODER_TOKEN }}
