@@ -1,4 +1,4 @@
-![emBold](assets/embold.svg)
+![emBold](../assets/embold.svg)
 
 # Akron/Cleveland Northeast Ohio Based Web Design and Development Company
 
