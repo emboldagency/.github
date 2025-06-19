@@ -2,9 +2,10 @@ name: "Sync Plugin Versions"
 description: "Checks or updates version numbers in plugin files to match the latest Git tag."
 inputs:
   fix:
+    type: boolean
     description: "Set to true to update files, false to only check"
     required: false
-    default: "false"
+    default: false
   plugin_main_file:
     description: "Main plugin file (e.g., wphaven.php)"
     required: true

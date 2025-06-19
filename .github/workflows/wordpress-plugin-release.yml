@@ -6,6 +6,26 @@ on:
       tag:
         required: true
         type: string
+        description: 'Release tag (e.g., 1.0.0 or v1.0.0)'
+      plugin_main_file:
+        required: false
+        type: string
+        description: 'Main plugin file (defaults to <repo>.php if not set)'
+      readme_file:
+        required: false
+        type: string
+        default: readme.txt
+        description: 'Readme file (default: readme.txt)'
+      fix:
+        required: false
+        type: boolean
+        default: false
+        description: 'Set to true to update files, false to only check'
+      tag_pattern:
+        required: false
+        type: string
+        default: '[0-9]+\.[0-9]+\.[0-9]+'
+        description: 'Regex pattern the tag must match to continue the release.'
 
 jobs:
   dist:
@@ -13,7 +33,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Set up PHP with Composer and WP-CLI
         uses: shivammathur/setup-php@v2
         with:
@@ -22,12 +41,37 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
+
+      - name: Cache WP-CLI packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.wp-cli/packages
+          key: ${{ runner.os }}-wpcli-packages-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wpcli-packages-
+
+      - name: Ensure tag matches pattern
+        if: github.ref_type == 'tag'
+        run: |
+          if [[ ! "${{ inputs.tag }}" =~ ^${{ inputs.tag_pattern }}$ ]]; then
+            echo "Tag '${{ inputs.tag }}' does not match required pattern: ^${{ inputs.tag_pattern }}$"
+            exit 1
+          fi
+
       - name: Check plugin versions match tag
         uses: ./.github/actions/sync-versions
+        if: github.ref_type == 'tag'
         with:
-          fix: "false" # or "true" to auto-fix
-          plugin_main_file: wphaven.php
-          readme_file: readme.txt
+          fix: ${{ inputs.fix }}
+          plugin_main_file: ${{ inputs.plugin_main_file || format('{0}.php', github.event.repository.name) }}
+          readme_file: ${{ inputs.readme_file }}
 
       - name: Install dist-archive command
         run: wp package install wp-cli/dist-archive-command:@stable
@@ -41,6 +85,6 @@ jobs:
 
       - name: Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(inputs.tag, 'v')
+        if: github.ref_type == 'tag'
         with:
           files: ./dist/*
