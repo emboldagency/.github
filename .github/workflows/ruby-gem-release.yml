@@ -36,11 +36,8 @@ jobs:
         run: |
           gem push --key github --host https://rubygems.pkg.github.com/emboldagency ${{ inputs.gem_name }}-*.gem
       - name: Upload gem to GitHub Release
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./*.gem
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./${{ inputs.gem_name }}-*.gem
-          asset_name: ${{ inputs.gem_name }}.gem
-          asset_content_type: application/gem
