@@ -1,0 +1,11 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    uses: emboldagency/.github/.github/workflows/ruby-gem-ci.yml@master

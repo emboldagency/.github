@@ -1,0 +1,13 @@
+name: Build and Release Gem
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build-and-publish:
+    uses: emboldagency/.github/.github/workflows/ruby-gem-release.yml@master
+    with:
+      gem_name: your-gem-name
+      gemspec: your-gem-name.gemspec # or path/to/your.gemspec
