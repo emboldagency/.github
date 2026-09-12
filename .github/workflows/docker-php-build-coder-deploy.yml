@@ -1,4 +1,4 @@
-name: Ruby Docker Build and Coder Template Update
+name: PHP Docker Build and Coder Template Update
 
 on:
   workflow_call:
@@ -39,7 +39,7 @@ jobs:
     needs: initialization
     strategy:
       matrix:
-        ruby_version: ["3.3.4", "3.2.5", "3.1.6", "3.0.7", "2.7.8"]
+        php_version: ["8.4", "8.3", "8.2", "8.1", "7.4"]
         ubuntu_version: ["24.04", "22.04"]
     steps:
       - name: Checkout Repository
@@ -60,9 +60,13 @@ jobs:
           context: ./build
           file: ./build/Dockerfile
           push: true
-          tags: ${{ secrets.DOCKER_USER }}/ruby:${{ matrix.ruby_version }}-ubuntu${{ matrix.ubuntu_version }}
+          secrets: |
+            GITHUB_TOKEN=${{ secrets.GITHUB_PACKAGES_TOKEN }}
+          tags: |
+            ${{ secrets.DOCKER_USER }}/php:${{ matrix.php_version }}-ubuntu${{ matrix.ubuntu_version }}-release${{ inputs.tag }}
+            ${{ secrets.DOCKER_USER }}/php:${{ matrix.php_version }}-ubuntu${{ matrix.ubuntu_version }}
           build-args: |
-            RUBY_VERSION=${{ matrix.ruby_version }}
+            PHP_VERSION=${{ matrix.php_version }}
             UBUNTU_VERSION=${{ matrix.ubuntu_version }}
 
   update-coder-template:
@@ -76,9 +80,9 @@ jobs:
       - name: Update Coder Template
         uses: matifali/update-coder-template@v3
         with:
-          id: ruby
+          id: php
           dir: .
           url: https://embold.dev
           name: ${{ inputs.tag }}
-          message: "Uploaded by GitHub Actions. Release notes: https://github.com/emboldagency/docker-ruby/releases/tag/${{ inputs.tag }}"
+          message: "Uploaded by GitHub Actions. Release notes: https://github.com/emboldagency/docker-php/releases/tag/${{ inputs.tag }}"
           coder_session_token: ${{ secrets.CODER_TOKEN }}
