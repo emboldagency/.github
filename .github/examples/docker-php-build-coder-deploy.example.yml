@@ -1,4 +1,4 @@
-name: Ruby Docker Build and Coder Template Update
+name: PHP Docker Build and Coder Template Update
 
 on:
   push:
@@ -12,8 +12,8 @@ on:
         default: ""
 
 jobs:
-  call-shared-ruby-docker-build:
-    uses: embold/.github/.github/workflows/ruby-docker-build-and-deploy.yml@main
+  call-shared-php-docker-build:
+    uses: emboldagency/.github/.github/workflows/php-docker-build-and-coder-deploy.yml@v1
     with:
       tag: ${{ github.ref_name }}
       skip-jobs: ${{ github.event.inputs.skip-jobs || '' }}

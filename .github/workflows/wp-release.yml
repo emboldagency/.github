@@ -1,0 +1,107 @@
+name: WordPress Plugin Release Reusable Workflow
+
+on:
+  workflow_call:
+    inputs:
+      plugin_slug:
+        description: 'The slug of the plugin (e.g. embold-tailwind-blocks)'
+        required: true
+        type: string
+      main_file:
+        description: 'The main PHP file of the plugin (e.g. embold-tailwind-blocks.php)'
+        required: true
+        type: string
+
+jobs:
+  dist:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout central tooling
+        uses: actions/checkout@v4
+        with:
+          repository: emboldagency/.github
+          path: .github-internal
+
+      - name: Prepare scripts
+        run: |
+          mkdir -p /tmp/embold-scripts
+          cp -r .github-internal/scripts/* /tmp/embold-scripts/
+          rm -rf .github-internal
+          chmod +x /tmp/embold-scripts/*.sh
+
+      - name: Set up PHP with Composer and WP-CLI
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer, wp-cli
+          github-token: ''
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v3
+        with:
+          path: vendor
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
+
+      - name: Install dist-archive command
+        run: wp package install wp-cli/dist-archive-command:v3.1.0 --allow-root
+
+      - name: Build distribution archive
+        env:
+          GIT_TAG: ${{ github.ref_name }}
+          PLUGIN_SLUG: ${{ inputs.plugin_slug }}
+          MAIN_FILE: ${{ inputs.main_file }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            bash /tmp/embold-scripts/build.sh --fix
+          else
+            bash /tmp/embold-scripts/build.sh --dev
+          fi
+
+      - name: Assemble release metadata
+        if: startsWith(github.ref, 'refs/tags/')
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          TITLE="$(git tag -l --format='%(contents:subject)' "$TAG")"
+          [ -n "$TITLE" ] || TITLE="$TAG"
+          { echo "title<<__EOF__"; echo "$TITLE"; echo "__EOF__"; } >> "$GITHUB_OUTPUT"
+
+          notes_for() {
+            if [ -f readme.txt ]; then
+              awk -v want="= $1 =" '
+                $0 == want { found=1; next }
+                found && /^= [0-9]/ { exit }
+                found
+              ' readme.txt | sed '/^$/d'
+            fi
+          }
+          
+          notes_for "$TAG" > "${RUNNER_TEMP}/notes.md"
+          
+          if [ ! -s "${RUNNER_TEMP}/notes.md" ]; then
+            notes_for "${TAG%%-*}" > "${RUNNER_TEMP}/notes.md"
+          fi
+          
+          if [ ! -s "${RUNNER_TEMP}/notes.md" ]; then
+            echo "No release notes available for this version." > "${RUNNER_TEMP}/notes.md"
+          fi
+
+          echo "--- release notes ---"
+          cat "${RUNNER_TEMP}/notes.md"
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: ${{ steps.meta.outputs.title }}
+          body_path: ${{ runner.temp }}/notes.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: dist/archives/*

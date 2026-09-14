@@ -13,7 +13,7 @@ on:
 
 jobs:
   call-shared-docker-build:
-    uses: embold/.github/.github/workflows/docker-build.yml@main
+    uses: emboldagency/.github/.github/workflows/docker-build.yml@v1
     with:
       tag: ${{ github.ref_name }}
       skip-jobs: ${{ github.event.inputs.skip-jobs || '' }}
