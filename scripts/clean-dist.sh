@@ -19,8 +19,11 @@
 
 set -e
 
-PLUGIN_SLUG="embold-wordpress-tweaks"
-MAIN_FILE="embold-wordpress-tweaks.php"
+PLUGIN_SLUG=$(basename "$PWD")
+MAIN_FILE=$(grep -l "^ \* Plugin Name:" *.php 2>/dev/null | head -n 1)
+if [ -z "$MAIN_FILE" ]; then
+	MAIN_FILE="${PLUGIN_SLUG}.php"
+fi
 DISTIGNORE=".distignore"
 
 RED='\033[0;31m'
