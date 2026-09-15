@@ -41,7 +41,8 @@ if [ -z "$LATEST_TAG" ]; then
 	echo -e "${YELLOW}⚠️  No Git tags found. Skipping version sync.${NC}"
 	VERSION=$(grep -E -o "Version: *[0-9A-Za-z.-]+" "$MAIN_FILE" | head -n1 | sed -E "s/Version: *//")
 else
-	VERSION="$LATEST_TAG"
+	CLEAN_VERSION="${LATEST_TAG#v}"
+	VERSION="$CLEAN_VERSION"
 
 	CURRENT_PLUGIN_VERSION=$(grep -E -o "Version: *[0-9A-Za-z.-]+" "$MAIN_FILE" | head -n1 | sed -E "s/Version: *//")
 	
@@ -51,17 +52,17 @@ else
 		CURRENT_README_VERSION=$(grep -E -o "Stable tag: *[0-9A-Za-z.-]+" "$README_FILE" | head -n1 | sed -E "s/Stable tag: *//")
 	fi
 
-	TAG_BASE_VERSION=$(echo "$LATEST_TAG" | sed -E 's/(-|\.pre|\.beta|\.rc).*//')
+	TAG_BASE_VERSION=$(echo "$CLEAN_VERSION" | sed -E 's/(-|\.pre|\.beta|\.rc).*//')
 
 	if [ "$1" == "--dev" ]; then
 		echo -e "${YELLOW}🔧 Development mode: Skipping version check.${NC}"
 		VERSION="$CURRENT_PLUGIN_VERSION"
 	elif [ "$1" == "--fix" ]; then
 		NEEDS_UPDATE=0
-		if [ "$CURRENT_PLUGIN_VERSION" != "$LATEST_TAG" ]; then
+		if [ "$CURRENT_PLUGIN_VERSION" != "$CLEAN_VERSION" ]; then
 			NEEDS_UPDATE=1
 		fi
-		if [ "$HAS_README" = "1" ] && [ "$CURRENT_README_VERSION" != "$LATEST_TAG" ]; then
+		if [ "$HAS_README" = "1" ] && [ "$CURRENT_README_VERSION" != "$CLEAN_VERSION" ]; then
 			NEEDS_UPDATE=1
 		fi
 		if [ "$HAS_README" = "1" ] && grep -q "^= Unreleased =$" "$README_FILE"; then
@@ -69,25 +70,25 @@ else
 		fi
 
 		if [ "$NEEDS_UPDATE" = "1" ]; then
-			echo -e "${BLUE}📦 Updating file versions to match tag: ${LATEST_TAG}...${NC}"
-			sed -i.bak -E "s/(Version: *)[0-9A-Za-z.-]+/\1$LATEST_TAG/" "$MAIN_FILE"
+			echo -e "${BLUE}📦 Updating file versions to match tag: ${CLEAN_VERSION}...${NC}"
+			sed -i.bak -E "s/(Version: *)[0-9A-Za-z.-]+/\1$CLEAN_VERSION/" "$MAIN_FILE"
 			
 			if [ "$HAS_README" = "1" ]; then
-				sed -i.bak -E "s/(Stable tag: *)[0-9A-Za-z.-]+/\1$LATEST_TAG/" "$README_FILE"
-				sed -i.bak -E "s/^= Unreleased =$/= $LATEST_TAG =/" "$README_FILE"
+				sed -i.bak -E "s/(Stable tag: *)[0-9A-Za-z.-]+/\1$CLEAN_VERSION/" "$README_FILE"
+				sed -i.bak -E "s/^= Unreleased =$/= $CLEAN_VERSION =/" "$README_FILE"
 				rm -f "$README_FILE.bak"
 			fi
 			rm -f "$MAIN_FILE.bak"
 			echo -e "${GREEN}✅ Files updated.${NC}"
 		else
-			echo -e "${GREEN}✅ Versions already match (${LATEST_TAG}).${NC}"
+			echo -e "${GREEN}✅ Versions already match (${CLEAN_VERSION}).${NC}"
 		fi
 	else
 		MISMATCH=0
-		if [ "$CURRENT_PLUGIN_VERSION" != "$LATEST_TAG" ] && [ "$CURRENT_PLUGIN_VERSION" != "$TAG_BASE_VERSION" ]; then
+		if [ "$CURRENT_PLUGIN_VERSION" != "$CLEAN_VERSION" ] && [ "$CURRENT_PLUGIN_VERSION" != "$TAG_BASE_VERSION" ]; then
 			MISMATCH=1
 		fi
-		if [ "$HAS_README" = "1" ] && [ "$CURRENT_README_VERSION" != "$LATEST_TAG" ] && [ "$CURRENT_README_VERSION" != "$TAG_BASE_VERSION" ]; then
+		if [ "$HAS_README" = "1" ] && [ "$CURRENT_README_VERSION" != "$CLEAN_VERSION" ] && [ "$CURRENT_README_VERSION" != "$TAG_BASE_VERSION" ]; then
 			MISMATCH=1
 		fi
 
