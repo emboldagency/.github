@@ -50,7 +50,8 @@ jobs:
             ${{ runner.os }}-composer-
 
       - name: Install dist-archive command
-        run: unset COMPOSER_AUTH
+        run: |
+          unset COMPOSER_AUTH
           wp package install wp-cli/dist-archive-command:v3.1.0 --allow-root
 
       - name: Build distribution archive
