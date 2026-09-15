@@ -94,6 +94,10 @@ jobs:
           fi
           
           if [ ! -s "${RUNNER_TEMP}/notes.md" ]; then
+            notes_for "${TAG#v}" > "${RUNNER_TEMP}/notes.md"
+          fi
+          
+          if [ ! -s "${RUNNER_TEMP}/notes.md" ]; then
             echo "No release notes available for this version." > "${RUNNER_TEMP}/notes.md"
           fi
 
