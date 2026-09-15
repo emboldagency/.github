@@ -129,9 +129,9 @@ run_dist_archive() {
 	echo -e "${BLUE}🚀 Running dist-archive...${NC}"
 
 	if [ -z "$cmd_prefix" ]; then
-		wp dist-archive . "$output_dir" --plugin-dirname='${PLUGIN_SLUG}' --create-target-dir --format=zip
+		wp dist-archive . "$output_dir" --plugin-dirname="${PLUGIN_SLUG}" --create-target-dir --format=zip
 	else
-		$cmd_prefix sh -c "cd $target_dir && wp dist-archive . /tmp/ --plugin-dirname='${PLUGIN_SLUG}' --format=zip --force"
+		$cmd_prefix sh -c "cd $target_dir && wp dist-archive . /tmp/ --plugin-dirname=\"${PLUGIN_SLUG}\" --format=zip --force"
 		local container_id
 		container_id=$(docker compose ps -q cli)
 		docker cp "${container_id}:/tmp/${PLUGIN_SLUG}.${VERSION}.zip" "./${DIST_DIR}/${PLUGIN_SLUG}.${VERSION}.zip"
@@ -140,7 +140,7 @@ run_dist_archive() {
 
 if [ "$CI" = "true" ] || [ "$ACT" = "true" ]; then
 	echo "🤖 CI Environment Detected"
-	wp dist-archive . "$DIST_DIR" --plugin-dirname='${PLUGIN_SLUG}' --create-target-dir --format=zip --allow-root
+	wp dist-archive . "$DIST_DIR" --plugin-dirname="${PLUGIN_SLUG}" --create-target-dir --format=zip --allow-root
 elif command -v wp &>/dev/null && wp core version &>/dev/null; then
 	echo "✅ Local WP-CLI Detected"
 	run_dist_archive "" "." "$DIST_DIR"
