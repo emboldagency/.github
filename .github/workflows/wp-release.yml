@@ -13,14 +13,95 @@ on:
         type: string
 
 jobs:
-  dist:
+  # Callers trigger on every tag so that a tag this workflow won't release is
+  # reported here, instead of never running and leaving a release with no zip.
+  check-tag:
     runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+      tag: ${{ steps.check.outputs.tag }}
+      renamed-from: ${{ steps.check.outputs.renamed-from }}
+    steps:
+      - name: Check the tag is a release version
+        id: check
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # A manual run on a branch is a dev build, not a release.
+          if [ "$REF_TYPE" != "tag" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            { echo "build=true"; echo "tag=$TAG"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Plugin tags have no v. Rather than fail someone's release over a
+          # habit, dist moves it to the bare tag and builds that.
+          if [[ "$TAG" =~ ^[vV]([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+            { echo "build=true"; echo "tag=${BASH_REMATCH[1]}"; echo "renamed-from=$TAG"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::notice::$TAG is not a version tag, so no release was built. If it was meant to be one, tag it as 1.2.3 or 1.2.3-beta.1."
+          echo "build=false" >> "$GITHUB_OUTPUT"
+
+  dist:
+    needs: check-tag
+    if: needs.check-tag.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout target repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # Pushed with GITHUB_TOKEN, so the new tag doesn't start a second run.
+      - name: Move a v tag to the bare version
+        if: needs.check-tag.outputs.renamed-from != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FROM: ${{ needs.check-tag.outputs.renamed-from }}
+          TAG: ${{ needs.check-tag.outputs.tag }}
+        run: |
+          SHA=$(git rev-parse "$FROM^{commit}")
+          EXISTING=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" || true)
+
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "$SHA" ]; then
+            echo "::error::$TAG already exists on ${EXISTING:0:9}, but $FROM is on ${SHA:0:9}. Delete whichever tag is wrong, then push the right one without a v."
+            exit 1
+          fi
+
+          if [ -z "$EXISTING" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            if [ "$(git cat-file -t "refs/tags/$FROM")" = "tag" ]; then
+              git tag -a "$TAG" "$SHA" -m "$(git tag -l --format='%(contents)' "$FROM")"
+            else
+              git tag "$TAG" "$SHA"
+            fi
+            git push origin "refs/tags/$TAG"
+          fi
+
+          if gh release view "$FROM" > /dev/null 2>&1; then
+            gh release edit "$FROM" --tag "$TAG"
+          fi
+          git push origin ":refs/tags/$FROM"
+
+          echo "::warning::Renamed $FROM to $TAG: plugin tags have no v. Tag future releases without the v (like $TAG), and run 'git fetch --prune --prune-tags' to drop $FROM locally."
+          {
+            echo "## \`$FROM\` was released as \`$TAG\`"
+            echo
+            echo "WordPress plugin tags have no \`v\`, so this run moved the tag (and its release, if there was one) to \`$TAG\` on the same commit and built that."
+            echo
+            echo "To drop the old tag from your clone: \`git fetch --prune --prune-tags\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Checkout central tooling
         uses: actions/checkout@v4
@@ -54,9 +135,28 @@ jobs:
           rm -f ~/.composer/auth.json ~/.config/composer/auth.json && unset COMPOSER_AUTH
           wp package install wp-cli/dist-archive-command:v3.1.0 --allow-root
 
+      # build.sh --fix stamps the tag's version into the zip either way; this
+      # only flags that the repo's own files say otherwise.
+      - name: Check the plugin files match the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG: ${{ needs.check-tag.outputs.tag }}
+          MAIN_FILE: ${{ inputs.main_file }}
+        run: |
+          HEADER=$(grep -E -o "Version: *[0-9A-Za-z.-]+" "$MAIN_FILE" | head -n1 | sed -E "s/Version: *//")
+          STABLE=$(grep -E -o "Stable tag: *[0-9A-Za-z.-]+" readme.txt 2>/dev/null | head -n1 | sed -E "s/Stable tag: *//" || true)
+
+          for pair in "$MAIN_FILE Version:$HEADER" "readme.txt Stable tag:$STABLE"; do
+            FILE="${pair%% *}"
+            FOUND="${pair##*:}"
+            if [ -n "$FOUND" ] && [ "$FOUND" != "$TAG" ]; then
+              echo "::warning file=$FILE::$FILE says $FOUND but the tag is $TAG. The zip was built as $TAG; bump $FILE in the next release so the repo agrees."
+            fi
+          done
+
       - name: Build distribution archive
         env:
-          GIT_TAG: ${{ github.ref_name }}
+          GIT_TAG: ${{ needs.check-tag.outputs.tag || github.ref_name }}
           PLUGIN_SLUG: ${{ inputs.plugin_slug }}
           MAIN_FILE: ${{ inputs.main_file }}
         run: |
@@ -73,53 +173,20 @@ jobs:
         id: meta
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check-tag.outputs.tag }}
+          NOTES_FILE: ${{ runner.temp }}/notes.md
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          EXISTING_TITLE=$(gh release view "$TAG" --json name --jq .name 2>/dev/null || echo "")
-          if [ -n "$EXISTING_TITLE" ] && [ "$EXISTING_TITLE" != "$TAG" ]; then
-            TITLE="$EXISTING_TITLE"
-          else
-            TITLE="$(git tag -l --format='%(contents:subject)' "$TAG")"
-            # If lightweight tag, the subject is the commit message. Fall back to tag name if it starts with Merge.
-            if [[ "$TITLE" == Merge* ]]; then
-              TITLE="$TAG"
-            fi
-          fi
-          [ -n "$TITLE" ] || TITLE="$TAG"
-          { echo "title<<__EOF__"; echo "$TITLE"; echo "__EOF__"; } >> "$GITHUB_OUTPUT"
-
-          notes_for() {
-            if [ -f readme.txt ]; then
-              awk -v want="= $1 =" '
-                $0 == want { found=1; next }
-                found && /^= [0-9]/ { exit }
-                found
-              ' readme.txt | sed '/^$/d'
-            fi
-          }
-          
-          notes_for "$TAG" > "${RUNNER_TEMP}/notes.md"
-          
-          if [ ! -s "${RUNNER_TEMP}/notes.md" ]; then
-            notes_for "${TAG%%-*}" > "${RUNNER_TEMP}/notes.md"
-          fi
-          
-          if [ ! -s "${RUNNER_TEMP}/notes.md" ]; then
-            notes_for "${TAG#v}" > "${RUNNER_TEMP}/notes.md"
-          fi
-          
-          if [ ! -s "${RUNNER_TEMP}/notes.md" ]; then
-            echo "No release notes available for this version." > "${RUNNER_TEMP}/notes.md"
-          fi
-
+          bash /tmp/embold-scripts/release-meta.sh
           echo "--- release notes ---"
-          cat "${RUNNER_TEMP}/notes.md"
+          cat "$NOTES_FILE"
 
       - name: Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          tag_name: ${{ needs.check-tag.outputs.tag }}
           name: ${{ steps.meta.outputs.title }}
           body_path: ${{ runner.temp }}/notes.md
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(needs.check-tag.outputs.tag, '-') }}
+          generate_release_notes: ${{ steps.meta.outputs.generated == 'true' }}
           files: dist/archives/*
