@@ -1,53 +1,181 @@
-name: Docker Build and Push
+name: Docker Build Reusable Workflow
+
+# Builds one GHCR image per Ubuntu version (and per language version, for the
+# language images), then optionally pushes the repo's Coder template.
+# Callers grant `packages: write` and pass `secrets: inherit`.
 
 on:
   workflow_call:
     inputs:
-      tag:
-        required: true
+      language:
+        description: 'Language the image is built for (php, ruby). Empty for the base image.'
         type: string
-      skip-jobs:
-        required: false
+        default: ''
+      versions:
+        description: 'JSON array of language versions, e.g. ["8.5", "8.4"]. Ignored without a language.'
         type: string
-        default: ""
-    secrets:
-      DOCKER_USER:
+        default: '[""]'
+      ubuntu_versions:
+        description: 'JSON array of Ubuntu versions, e.g. ["26.04", "24.04"]'
+        type: string
         required: true
-      DOCKER_TOKEN:
-        required: true
+      exclude:
+        description: 'JSON array of {version, ubuntu} pairs not to build'
+        type: string
+        default: '[]'
+      latest_version:
+        description: 'Language version tagged `latest` on a release. Empty leaves `latest` to docker/metadata-action.'
+        type: string
+        default: ''
+      latest_ubuntu:
+        description: 'Ubuntu version tagged `latest` on a release, with latest_version'
+        type: string
+        default: ''
+      context:
+        description: 'Docker build context'
+        type: string
+        default: './build'
+      coder_template:
+        description: 'Coder template to push on a release. Empty skips it.'
+        type: string
+        default: ''
+      skip_jobs:
+        description: 'Space-separated jobs to skip: build-and-push-docker, update-coder-template'
+        type: string
+        default: ''
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  initialization:
+  build-and-push-docker:
+    if: ${{ !contains(inputs.skip_jobs, 'build-and-push-docker') }}
     runs-on: ubuntu-latest
-    outputs:
-      skip-build-and-push-docker: ${{ steps.set-skip-build-and-push-docker.outputs.skip }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(inputs.language != '' && inputs.versions || '[""]') }}
+        ubuntu: ${{ fromJSON(inputs.ubuntu_versions) }}
+        exclude: ${{ fromJSON(inputs.exclude) }}
+
     steps:
-      - name: Determine Jobs to Skip
-        id: set-skip-build-and-push-docker
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Names match what each repo used before consolidating, so existing
+      # image tags carry on and the registry caches stay warm.
+      - name: Name the image variant
+        id: variant
+        env:
+          LANGUAGE: ${{ inputs.language }}
+          VERSION: ${{ matrix.version }}
+          UBUNTU: ${{ matrix.ubuntu }}
+          LATEST_VERSION: ${{ inputs.latest_version }}
+          LATEST_UBUNTU: ${{ inputs.latest_ubuntu }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
-          if [[ "${{ inputs.skip-jobs }}" == *"build-and-push-docker"* ]]; then
-            echo "skip=true" >> $GITHUB_ENV
+          if [ -n "$LANGUAGE" ]; then
+            NAME="$VERSION-ubuntu$UBUNTU"
+            CACHE="buildcache-$LANGUAGE-$VERSION-ubuntu-$UBUNTU"
+            BUILD_ARG="${LANGUAGE^^}_VERSION=$VERSION"
           else
-            echo "skip=false" >> $GITHUB_ENV
+            NAME="ubuntu$UBUNTU"
+            CACHE="buildcache-build-$UBUNTU"
+            BUILD_ARG=""
           fi
 
-  build-and-push-docker:
-    if: ${{ !contains(inputs.skip-jobs, 'build-and-push-docker') }}
-    runs-on: ubuntu-latest
-    needs: initialization
-    strategy:
-      matrix:
-        ruby_version: ["3.3.4", "3.2.5", "3.1.6", "3.0.7", "2.7.8"]
-        ubuntu_version: ["24.04", "22.04"]
-    steps:
-      - name: Build and Push Docker Image
-        uses: ./.github/actions/docker-build-push
+          if [ -n "$LATEST_VERSION" ]; then
+            FLAVOR="latest=false"
+            IS_LATEST=false
+            if [ "$REF_TYPE" = "tag" ] && [ "$VERSION" = "$LATEST_VERSION" ] && [ "$UBUNTU" = "$LATEST_UBUNTU" ]; then
+              IS_LATEST=true
+            fi
+          else
+            FLAVOR="latest=auto"
+            IS_LATEST=false
+          fi
+
+          {
+            echo "name=$NAME"
+            echo "cache=$REGISTRY/$IMAGE_NAME:$CACHE"
+            echo "build-arg=$BUILD_ARG"
+            echo "flavor=$FLAVOR"
+            echo "is-latest=$IS_LATEST"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
         with:
-          context: ./build
-          dockerfile: ./build/Dockerfile
-          tags: ${{ secrets.DOCKER_USER }}/ruby:${{ matrix.ruby_version }}-ubuntu${{ matrix.ubuntu_version }}-${{ inputs.tag }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: ${{ steps.variant.outputs.flavor }}
+          tags: |
+            type=match,pattern=v(.*),group=1,prefix=${{ steps.variant.outputs.name }}-
+            type=raw,value=${{ steps.variant.outputs.name }}
+            type=raw,value=latest,enable=${{ steps.variant.outputs.is-latest }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ inputs.context }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            RUBY_VERSION=${{ matrix.ruby_version }}
-            UBUNTU_VERSION=${{ matrix.ubuntu_version }}
-          username: ${{ secrets.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+            ${{ steps.variant.outputs.build-arg }}
+            UBUNTU_VERSION=${{ matrix.ubuntu }}
+          # Lets a Dockerfile authenticate its api.github.com lookups; unused otherwise.
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
+          cache-from: type=registry,ref=${{ steps.variant.outputs.cache }}
+          cache-to: type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ref=${{ steps.variant.outputs.cache }}
+
+  update-coder-template:
+    needs: build-and-push-docker
+    # A skipped build still lets the template go out; a failed one does not.
+    if: ${{ !cancelled() && inputs.coder_template != '' && github.ref_type == 'tag' && !contains(inputs.skip_jobs, 'update-coder-template') && needs.build-and-push-docker.result != 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Coder
+        uses: coder/setup-action@v1
+        with:
+          access_url: https://coder.embold.dev
+          coder_session_token: ${{ secrets.CODER_TOKEN }}
+
+      - name: Push Coder template
+        env:
+          TEMPLATE: ${{ inputs.coder_template }}
+          RELEASE: ${{ github.ref_name }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          # Shared browserless token; must match the browserless Portainer stack.
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+          # 1Password service account (pulsar-deploy, read on Ops-Apps). Becomes
+          # OP_SERVICE_ACCOUNT_TOKEN in every workspace via the onepassword module.
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+        run: |
+          coder templates push "$TEMPLATE" \
+            --directory . \
+            --name "$RELEASE" \
+            --message "Release: $RELEASE" \
+            --var "ghp_registry_pass=${GHCR_TOKEN}" \
+            --var "playwright_token=${BROWSERLESS_TOKEN}" \
+            --var "op_service_account_token=${OP_SERVICE_ACCOUNT_TOKEN}" \
+            --activate=false \
+            --yes
