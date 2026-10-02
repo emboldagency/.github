@@ -1,22 +1,32 @@
-name: Docker Build and Push
+name: Build and Deploy
 
 on:
   push:
+    branches:
+      - main # keeps the registry cache warm
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]"
+      - "v[0-9]+.[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
     inputs:
       skip-jobs:
-        description: "Space-separated list of jobs to skip"
+        description: "Space-separated jobs to skip: build-and-push-docker, update-coder-template"
         required: false
         default: ""
 
 jobs:
-  call-shared-docker-build:
-    uses: emboldagency/.github/.github/workflows/docker-build.yml@v1
+  build:
+    uses: emboldagency/.github/.github/workflows/docker-build.yml@master
+    permissions:
+      contents: read
+      packages: write
     with:
-      tag: ${{ github.ref_name }}
-      skip-jobs: ${{ github.event.inputs.skip-jobs || '' }}
-    secrets:
-      DOCKER_USER: ${{ secrets.DOCKER_USER }}
-      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+      # Leave language and versions out for a base image (build context ".").
+      language: php
+      versions: '["8.5", "8.4", "8.3"]'
+      ubuntu_versions: '["26.04", "24.04"]'
+      exclude: '[{"version": "8.3", "ubuntu": "26.04"}]'
+      latest_version: "8.5"
+      latest_ubuntu: "26.04"
+      coder_template: php
+      skip_jobs: ${{ inputs.skip-jobs || '' }}
+    secrets: inherit
