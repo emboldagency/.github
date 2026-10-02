@@ -62,6 +62,39 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Sites read the plugin's Version header from the repo at this tag, not
+      # from the zip, so a release whose files disagree is never offered.
+      - name: Check the plugin files match the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG: ${{ needs.check-tag.outputs.tag }}
+          REF: ${{ github.ref_name }}
+          MAIN_FILE: ${{ inputs.main_file }}
+        run: |
+          HEADER=$(grep -E -o "Version: *[0-9A-Za-z.-]+" "$MAIN_FILE" | head -n1 | sed -E "s/Version: *//")
+          STABLE=$(grep -E -o "Stable tag: *[0-9A-Za-z.-]+" readme.txt 2>/dev/null | head -n1 | sed -E "s/Stable tag: *//" || true)
+
+          WRONG=""
+          [ "$HEADER" = "$TAG" ] || WRONG="$WRONG $MAIN_FILE (Version: ${HEADER:-missing})"
+          [ -z "$STABLE" ] || [ "$STABLE" = "$TAG" ] || WRONG="$WRONG readme.txt (Stable tag: $STABLE)"
+
+          if [ -n "$WRONG" ]; then
+            echo "::error::$TAG was not released: sites read the version from the plugin's files, and${WRONG} disagree, so WordPress would never offer it."
+            {
+              echo "## \`$TAG\` was not released"
+              echo
+              echo "WordPress sites decide whether to update from the plugin's \`Version:\` header at this tag, not from the zip. These files don't say \`$TAG\`:${WRONG}"
+              echo
+              echo "Set both to \`$TAG\`, commit, then move the tag to that commit:"
+              echo
+              echo '```bash'
+              echo "git tag -f $TAG && git push -f origin $TAG"
+              echo '```'
+              [ "$REF" = "$TAG" ] || echo "(\`$REF\` has not been renamed yet; tag the fixed commit as \`$TAG\`.)"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
       # Pushed with GITHUB_TOKEN, so the new tag doesn't start a second run.
       - name: Move a v tag to the bare version
         if: needs.check-tag.outputs.renamed-from != ''
@@ -134,25 +167,6 @@ jobs:
         run: |
           rm -f ~/.composer/auth.json ~/.config/composer/auth.json && unset COMPOSER_AUTH
           wp package install wp-cli/dist-archive-command:v3.1.0 --allow-root
-
-      # build.sh --fix stamps the tag's version into the zip either way; this
-      # only flags that the repo's own files say otherwise.
-      - name: Check the plugin files match the tag
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          TAG: ${{ needs.check-tag.outputs.tag }}
-          MAIN_FILE: ${{ inputs.main_file }}
-        run: |
-          HEADER=$(grep -E -o "Version: *[0-9A-Za-z.-]+" "$MAIN_FILE" | head -n1 | sed -E "s/Version: *//")
-          STABLE=$(grep -E -o "Stable tag: *[0-9A-Za-z.-]+" readme.txt 2>/dev/null | head -n1 | sed -E "s/Stable tag: *//" || true)
-
-          for pair in "$MAIN_FILE Version:$HEADER" "readme.txt Stable tag:$STABLE"; do
-            FILE="${pair%% *}"
-            FOUND="${pair##*:}"
-            if [ -n "$FOUND" ] && [ "$FOUND" != "$TAG" ]; then
-              echo "::warning file=$FILE::$FILE says $FOUND but the tag is $TAG. The zip was built as $TAG; bump $FILE in the next release so the repo agrees."
-            fi
-          done
 
       - name: Build distribution archive
         env:
