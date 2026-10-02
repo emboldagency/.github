@@ -58,7 +58,7 @@ jobs:
 
     steps:
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -104,7 +104,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Checkout central tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: emboldagency/.github
           path: .github-internal
@@ -123,7 +123,7 @@ jobs:
           tools: composer, wp-cli
 
       - name: Cache Composer dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v6
         with:
           path: vendor
           key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
@@ -181,7 +181,7 @@ jobs:
           cat "$NOTES_FILE"
 
       - name: Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           tag_name: ${{ needs.check-tag.outputs.tag }}
