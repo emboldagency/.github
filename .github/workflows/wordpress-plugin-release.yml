@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up PHP with Composer and WP-CLI
         uses: shivammathur/setup-php@v2
         with:
@@ -47,7 +47,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache Composer dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vendor
           key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
@@ -55,7 +55,7 @@ jobs:
             ${{ runner.os }}-composer-
 
       - name: Cache WP-CLI packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.wp-cli/packages
           key: ${{ runner.os }}-wpcli-packages-${{ hashFiles('**/composer.lock') }}
@@ -150,7 +150,7 @@ jobs:
         run: wp dist-archive . dist --create-target-dir
 
       - name: Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: github.ref_type == 'tag'
         with:
           files: ./dist/*
