@@ -151,6 +151,9 @@ jobs:
 
       - name: Set up PHP with Composer and WP-CLI
         uses: shivammathur/setup-php@v2
+        env:
+          # A tool that fails to download otherwise surfaces two steps later as "wp: command not found".
+          fail-fast: true
         with:
           php-version: '8.3'
           tools: composer, wp-cli
