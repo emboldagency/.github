@@ -13,7 +13,64 @@ on:
         type: string
 
 jobs:
+  # Callers trigger on every tag so that a tag this workflow won't release is
+  # reported here, instead of never running and leaving a release with no zip.
+  check-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - name: Check the tag is a release version
+        id: check
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # A manual run on a branch is a dev build, not a release.
+          if [ "$REF_TYPE" != "tag" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$TAG" =~ ^[vV]([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+            BARE="${BASH_REMATCH[1]}"
+            echo "::error::Plugin releases are tagged without a v prefix ($BARE, not $TAG). No release zip was built."
+            {
+              echo "## \`$TAG\` was not released"
+              echo
+              echo "WordPress plugin tags have no \`v\` prefix, so this workflow builds \`$BARE\`, not \`$TAG\`."
+              echo
+              echo "**If a GitHub release exists on \`$TAG\`**, move it to the bare tag at the same commit:"
+              echo
+              echo '```bash'
+              echo "git fetch --tags"
+              echo "gh release edit $TAG --tag $BARE --target \$(git rev-parse '$TAG^{commit}')"
+              echo "git push origin :refs/tags/$TAG"
+              echo "gh workflow run release.yml --ref $BARE   # only if no zip was attached"
+              echo '```'
+              echo
+              echo "**If there is no release yet**, replace the tag and this workflow creates the release:"
+              echo
+              echo '```bash'
+              echo "git fetch --tags"
+              echo "git tag $BARE '$TAG^{commit}'"
+              echo "git push origin $BARE :refs/tags/$TAG"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "::notice::$TAG is not a version tag, so no release was built. If it was meant to be one, tag it as 1.2.3 or 1.2.3-beta.1."
+          echo "build=false" >> "$GITHUB_OUTPUT"
+
   dist:
+    needs: check-tag
+    if: needs.check-tag.outputs.build == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -53,6 +110,25 @@ jobs:
         run: |
           rm -f ~/.composer/auth.json ~/.config/composer/auth.json && unset COMPOSER_AUTH
           wp package install wp-cli/dist-archive-command:v3.1.0 --allow-root
+
+      # build.sh --fix stamps the tag's version into the zip either way; this
+      # only flags that the repo's own files say otherwise.
+      - name: Check the plugin files match the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG: ${{ github.ref_name }}
+          MAIN_FILE: ${{ inputs.main_file }}
+        run: |
+          HEADER=$(grep -E -o "Version: *[0-9A-Za-z.-]+" "$MAIN_FILE" | head -n1 | sed -E "s/Version: *//")
+          STABLE=$(grep -E -o "Stable tag: *[0-9A-Za-z.-]+" readme.txt 2>/dev/null | head -n1 | sed -E "s/Stable tag: *//" || true)
+
+          for pair in "$MAIN_FILE Version:$HEADER" "readme.txt Stable tag:$STABLE"; do
+            FILE="${pair%% *}"
+            FOUND="${pair##*:}"
+            if [ -n "$FOUND" ] && [ "$FOUND" != "$TAG" ]; then
+              echo "::warning file=$FILE::$FILE says $FOUND but the tag is $TAG. The zip was built as $TAG; bump $FILE in the next release so the repo agrees."
+            fi
+          done
 
       - name: Build distribution archive
         env:

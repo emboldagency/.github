@@ -1,15 +1,16 @@
 name: WordPress Plugin Release
 
 on:
+  # Every tag: the shared workflow reports one it won't release (e.g. v1.2.3)
+  # instead of the run silently never happening.
   push:
     tags:
-      - "v?[0-9]+.[0-9]+.[0-9]+"
-      - "v?[0-9]+.[0-9]+.[0-9]+-*"
+      - "*"
   workflow_dispatch:
 
 jobs:
   dist:
-    uses: emboldagency/.github/.github/workflows/wp-release.yml@main
+    uses: emboldagency/.github/.github/workflows/wp-release.yml@master
     with:
       # Replace these with your actual plugin details:
       plugin_slug: 'your-plugin-slug'
