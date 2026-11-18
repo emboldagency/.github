@@ -34,7 +34,7 @@ if [ -n "$GIT_TAG" ]; then
 	LATEST_TAG="$GIT_TAG"
 	echo -e "${BLUE}ℹ️  Using provided GIT_TAG: ${LATEST_TAG}${NC}"
 else
-	LATEST_TAG=$(git tag --list --sort=-version:refname 2>/dev/null | head -n 1)
+	LATEST_TAG=$(git tag --list --sort=-version:refname 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' | head -n 1)
 fi
 
 if [ -z "$LATEST_TAG" ]; then
