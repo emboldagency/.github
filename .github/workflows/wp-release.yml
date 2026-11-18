@@ -149,14 +149,27 @@ jobs:
           rm -rf .github-internal
           chmod +x /tmp/embold-scripts/*.sh
 
-      - name: Set up PHP with Composer and WP-CLI
+      - name: Set up PHP with Composer
         uses: shivammathur/setup-php@v2
         env:
-          # A tool that fails to download otherwise surfaces two steps later as "wp: command not found".
+          # A tool that fails to download otherwise surfaces two steps later as "composer: command not found".
           fail-fast: true
         with:
           php-version: '8.3'
-          tools: composer, wp-cli
+          tools: composer
+
+      # setup-php fetches WP-CLI once with no retry, and an occasional failed download sank the release.
+      - name: Install WP-CLI
+        env:
+          WP_CLI_VERSION: '2.12.0'
+        run: |
+          BASE="https://github.com/wp-cli/wp-cli/releases/download/v${WP_CLI_VERSION}/wp-cli-${WP_CLI_VERSION}.phar"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o wp-cli.phar "$BASE"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o wp-cli.phar.sha512 "$BASE.sha512"
+          echo "$(cat wp-cli.phar.sha512)  wp-cli.phar" | sha512sum -c -
+          sudo install -m 0755 wp-cli.phar /usr/local/bin/wp
+          rm -f wp-cli.phar wp-cli.phar.sha512
+          wp --info --allow-root
 
       - name: Cache Composer dependencies
         uses: actions/cache@v6
@@ -169,7 +182,13 @@ jobs:
       - name: Install dist-archive command
         run: |
           rm -f ~/.composer/auth.json ~/.config/composer/auth.json && unset COMPOSER_AUTH
-          wp package install wp-cli/dist-archive-command:v3.1.0 --allow-root
+          for attempt in 1 2 3; do
+            wp package install wp-cli/dist-archive-command:v3.1.0 --allow-root && exit 0
+            echo "::warning::dist-archive install failed (attempt $attempt of 3), retrying"
+            sleep $((attempt * 10))
+          done
+          echo "::error::Could not install wp-cli/dist-archive-command after 3 attempts"
+          exit 1
 
       - name: Build distribution archive
         env:
