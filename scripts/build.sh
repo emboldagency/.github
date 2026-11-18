@@ -34,7 +34,7 @@ if [ -n "$GIT_TAG" ]; then
 	LATEST_TAG="$GIT_TAG"
 	echo -e "${BLUE}ℹ️  Using provided GIT_TAG: ${LATEST_TAG}${NC}"
 else
-	LATEST_TAG=$(git tag --list --sort=-version:refname 2>/dev/null | head -n 1)
+	LATEST_TAG=$(git tag --list --sort=-version:refname 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' | head -n 1)
 fi
 
 if [ -z "$LATEST_TAG" ]; then
@@ -122,41 +122,19 @@ fi
 mkdir -p "$DIST_DIR"
 rm -f "$DIST_DIR/${PLUGIN_SLUG}"*.zip 2>/dev/null || true
 
-run_dist_archive() {
-	local cmd_prefix="$1"
-	local target_dir="$2"
-	local output_dir="$3"
-
-	echo -e "${BLUE}🚀 Running dist-archive...${NC}"
-
-	if [ -z "$cmd_prefix" ]; then
-		wp dist-archive . "$output_dir" --plugin-dirname="${PLUGIN_SLUG}" --create-target-dir --format=zip
-	else
-		$cmd_prefix sh -c "cd $target_dir && wp dist-archive . /tmp/ --plugin-dirname=\"${PLUGIN_SLUG}\" --format=zip --force"
-		local container_id
-		container_id=$(docker compose ps -q cli)
-		docker cp "${container_id}:/tmp/${PLUGIN_SLUG}.${VERSION}.zip" "./${DIST_DIR}/${PLUGIN_SLUG}.${VERSION}.zip"
-	fi
-}
-
-if [ "$CI" = "true" ] || [ "$ACT" = "true" ]; then
-	echo "🤖 CI Environment Detected"
-	wp dist-archive . "$DIST_DIR" --plugin-dirname="${PLUGIN_SLUG}" --create-target-dir --format=zip --allow-root
-elif command -v wp &>/dev/null && wp core version &>/dev/null; then
-	echo "✅ Local WP-CLI Detected"
-	run_dist_archive "" "." "$DIST_DIR"
-else
-	echo "🐳 Docker Environment Detected"
-	STARTED_CLI=0
-	if [ -z "$(docker compose ps -q cli 2>/dev/null)" ]; then
-		echo -e "${YELLOW}⚠️  CLI container not running. Starting...${NC}"
-		docker compose up cli -d
-		STARTED_CLI=1
-	fi
-
-	DOCKER_PLUGIN_PATH="/var/www/html/wp-content/plugins/${PLUGIN_SLUG}"
-	run_dist_archive "docker compose exec -T cli" "$DOCKER_PLUGIN_PATH" ""
+if ! command -v wp &>/dev/null; then
+	echo -e "${RED}❌ WP-CLI not found. Install it: https://wp-cli.org/#installing${NC}"
+	exit 1
 fi
+if ! wp help dist-archive &>/dev/null; then
+	echo -e "${RED}❌ The dist-archive command is missing. Install the version CI uses:${NC}"
+	echo "   wp package install wp-cli/dist-archive-command:v3.1.0"
+	exit 1
+fi
+
+# dist-archive reads the plugin header and .distignore from this directory, so no WordPress install is needed.
+echo -e "${BLUE}🚀 Running dist-archive...${NC}"
+wp dist-archive . "$DIST_DIR" --plugin-dirname="${PLUGIN_SLUG}" --create-target-dir --format=zip --allow-root
 
 if ls "$DIST_DIR/${PLUGIN_SLUG}"*.zip 1>/dev/null 2>&1; then
 	echo -e "${GREEN}✅ Build Complete!${NC}"
@@ -179,9 +157,3 @@ rm -rf temp
 cd ../..
 
 echo -e "${GREEN}✅ Distribution extracted.${NC}"
-
-if [ "${STARTED_CLI:-0}" = "1" ] && [ "${KEEP_CLI:-0}" != "1" ]; then
-	echo -e "${BLUE}🧹 Bringing down compose stack started for the build...${NC}"
-	docker compose down cli --remove-orphans >/dev/null 2>&1 || true
-	docker compose down --remove-orphans >/dev/null 2>&1 || true
-fi
